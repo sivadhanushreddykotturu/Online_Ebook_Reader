@@ -66,15 +66,6 @@ export async function DELETE(
     // Delete file from R2
     await deleteFromR2(book.r2Key);
 
-    // Delete cover from R2 if it exists
-    if (book.coverKey) {
-      try {
-        await deleteFromR2(book.coverKey);
-      } catch (coverErr) {
-        console.error('Failed to delete cover from R2:', coverErr);
-      }
-    }
-
     // Delete book from MongoDB
     await Book.deleteOne({ _id: params.id, userId: session.user.id });
 

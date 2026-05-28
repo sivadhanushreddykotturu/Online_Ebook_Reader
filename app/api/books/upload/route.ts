@@ -16,16 +16,16 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
+    let r2Key = formData.get('r2Key') as string | null;
     const title = formData.get('title') as string | null;
     const totalPagesStr = formData.get('totalPages') as string | null;
-    const coverFile = formData.get('cover') as File | null;
 
-    if (!file || !title || !totalPagesStr) {
+    if (!title || !totalPagesStr) {
       return NextResponse.json({ error: 'Missing or invalid parameters' }, { status: 400 });
     }
 
-    if (file.type !== 'application/pdf') {
-      return NextResponse.json({ error: 'Only PDF files are allowed' }, { status: 400 });
+    if (!file && !r2Key) {
+      return NextResponse.json({ error: 'Either file or r2Key is required' }, { status: 400 });
     }
 
     const totalPages = parseInt(totalPagesStr, 10);
@@ -43,38 +43,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const cleanFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const r2Key = `books/${session.user.id}/${Date.now()}-${cleanFilename}`;
-
-    const command = new PutObjectCommand({
-      Bucket: R2_BUCKET,
-      Key: r2Key,
-      Body: Readable.fromWeb(file.stream() as unknown as Parameters<typeof Readable.fromWeb>[0]),
-      ContentType: 'application/pdf',
-      ContentLength: file.size,
-    });
-
-    await s3Client.send(command);
-
-    let coverKey: string | undefined = undefined;
-    if (coverFile) {
-      try {
-        const coverBuffer = Buffer.from(await coverFile.arrayBuffer());
-        const cleanCoverFilename = coverFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        coverKey = `covers/${session.user.id}/${Date.now()}-${cleanCoverFilename}`;
-
-        const coverCommand = new PutObjectCommand({
-          Bucket: R2_BUCKET,
-          Key: coverKey,
-          Body: coverBuffer,
-          ContentType: 'image/jpeg',
-          ContentLength: coverFile.size,
-        });
-
-        await s3Client.send(coverCommand);
-      } catch (err) {
-        console.error('Failed to upload cover to R2:', err);
+    if (file) {
+      if (file.type !== 'application/pdf') {
+        return NextResponse.json({ error: 'Only PDF files are allowed' }, { status: 400 });
       }
+
+      const cleanFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      r2Key = `books/${session.user.id}/${Date.now()}-${cleanFilename}`;
+
+      const command = new PutObjectCommand({
+        Bucket: R2_BUCKET,
+        Key: r2Key,
+        Body: Readable.fromWeb(file.stream() as unknown as Parameters<typeof Readable.fromWeb>[0]),
+        ContentType: 'application/pdf',
+        ContentLength: file.size,
+      });
+
+      await s3Client.send(command);
+    }
+
+    if (!r2Key) {
+      return NextResponse.json({ error: 'R2 Key is required' }, { status: 400 });
     }
 
     const newBook = await Book.create({
@@ -85,7 +74,6 @@ export async function POST(request: Request) {
       totalPages,
       expiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
       isVip: false,
-      coverKey,
     });
 
     return NextResponse.json(newBook, { status: 201 });
