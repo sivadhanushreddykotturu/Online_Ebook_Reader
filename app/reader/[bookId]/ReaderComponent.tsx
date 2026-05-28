@@ -38,6 +38,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState<number>(initialBook.currentPage || 1);
   const [loading, setLoading] = useState(true);
+  const [loadingMsg, setLoadingMsg] = useState('Loading PDF...');
   const [renderingPage, setRenderingPage] = useState(false);
   const [isEditingPage, setIsEditingPage] = useState(false);
   const [inputPageVal, setInputPageVal] = useState('');
@@ -103,10 +104,10 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         const cached = await getCachedPdf(book.r2Key);
 
         if (cached) {
-          
+          setLoadingMsg('Loading PDF...');
           pdfSource = { data: new Uint8Array(cached) };
         } else {
-          
+          setLoadingMsg('Downloading PDF... (First-time load may take a moment)');
           const pdfRes = await fetch(`/api/pdf/${book._id}`, {
             signal: abortController.signal,
           });
@@ -116,6 +117,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
           cachePdf(book.r2Key, buffer).catch(() => {});
 
           pdfSource = { data: new Uint8Array(buffer) };
+          setLoadingMsg('Loading PDF...');
         }
 
         const loadingTask = pdfjs.getDocument(pdfSource);
@@ -552,7 +554,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
             color: '#888',
             fontSize: '14px',
           }}>
-            Loading PDF...
+            {loadingMsg}
           </div>
         ) : viewMode === 'scroll' ? (
           <div
