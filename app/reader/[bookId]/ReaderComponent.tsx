@@ -58,9 +58,14 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const gestureZoomRef = useRef<number | null>(null);
   const zoomTargetRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(800);
+  const visiblePagesRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+      setWindowWidth(window.innerWidth);
+    };
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -178,10 +183,10 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         const context1 = canvas1?.getContext('2d');
 
         if (canvas1 && context1) {
-          const containerWidth = Math.min(window.innerWidth - 32, 800) * zoom;
+          const containerWidth = Math.min(windowWidth - 32, 800) * zoom;
           const desiredWidth = viewMode === 'split' ? containerWidth * 2 : containerWidth;
           const unscaledViewport = page1.getViewport({ scale: 1 });
-          const outputScale = Math.min(Math.max(window.devicePixelRatio || 1, 2.0), 3.0);
+          const outputScale = Math.min(Math.max((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1, 2.0), 3.0);
           const scale = (desiredWidth / unscaledViewport.width) * outputScale;
           const viewport1 = page1.getViewport({ scale });
 
@@ -214,7 +219,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     return () => {
       active = false;
     };
-  }, [pageNumber, pdfDoc, zoom, viewMode, splitSide]);
+  }, [pageNumber, pdfDoc, zoom, viewMode, splitSide, windowWidth]);
 
   useEffect(() => {
     if (!book || loading) return;
@@ -314,11 +319,18 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
   }, [viewMode, pageNumber, splitSide, numPages]);
 
-  const handlePageVisible = useCallback((pageNum: number) => {
-    if (pageNumber !== pageNum) {
-      setPageNumber(pageNum);
+  const handlePageVisible = useCallback((pageNum: number, isVisible: boolean) => {
+    if (isVisible) {
+      visiblePagesRef.current.add(pageNum);
+    } else {
+      visiblePagesRef.current.delete(pageNum);
     }
-  }, [pageNumber]);
+
+    if (visiblePagesRef.current.size > 0) {
+      const minPage = Math.min(...Array.from(visiblePagesRef.current));
+      setPageNumber(minPage);
+    }
+  }, []);
 
   useEffect(() => {
     function handleGlobalKeyDown(e: KeyboardEvent) {
@@ -474,20 +486,8 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
   };
 
-  if (loading || !book) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        background: '#191919',
-        color: '#888',
-        fontSize: '14px',
-      }}>
-        Loading...
-      </div>
-    );
+  if (!book) {
+    return null;
   }
 
   return (
@@ -503,7 +503,6 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         overflow: 'hidden',
       }}
     >
-      {}
       <button
         onClick={toggleFullscreen}
         style={{
@@ -530,7 +529,6 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         <span style={{ fontSize: '14px' }}>⛶</span>
       </button>
 
-      {}
       <div
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -545,7 +543,18 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
           flexDirection: 'column',
         }}
       >
-        {viewMode === 'scroll' ? (
+        {loading ? (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flex: 1,
+            color: '#888',
+            fontSize: '14px',
+          }}>
+            Loading PDF...
+          </div>
+        ) : viewMode === 'scroll' ? (
           <div
             ref={zoomTargetRef}
             style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '24px auto 0 auto' }}
@@ -558,15 +567,15 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
                   zoom={zoom}
                   pageAspectRatio={pageAspectRatio}
                   onVisible={handlePageVisible}
+                  windowWidth={windowWidth}
                 />
               </div>
             ))}
           </div>
         ) : (
-          
           <div style={{
             width: '100%',
-            maxWidth: `${Math.min(window.innerWidth - 32, 800) * zoom}px`,
+            maxWidth: `${Math.min(windowWidth - 32, 800) * zoom}px`,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -588,7 +597,6 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
               </div>
             )}
 
-            {}
             <div
               ref={zoomTargetRef}
               style={{
@@ -616,7 +624,6 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         )}
       </div>
 
-      {}
       <div style={{
         position: 'fixed',
         bottom: 0,
@@ -990,10 +997,11 @@ interface ScrollModePageProps {
   pdfDoc: PDFDocumentProxy;
   zoom: number;
   pageAspectRatio: number;
-  onVisible: (pageNumber: number) => void;
+  onVisible: (pageNumber: number, isVisible: boolean) => void;
+  windowWidth: number;
 }
 
-function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible }: ScrollModePageProps) {
+function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible, windowWidth }: ScrollModePageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderTaskRef = useRef<PDFRenderTask | null>(null);
@@ -1001,15 +1009,10 @@ function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible }
   const [isRendered, setIsRendered] = useState(false);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
+    const preloadObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            setIsVisible(true);
-            onVisible(pageNumber);
-          } else {
-            setIsVisible(false);
-          }
+          setIsVisible(entry.isIntersecting);
         });
       },
       {
@@ -1017,16 +1020,30 @@ function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible }
       }
     );
 
+    const viewportObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          onVisible(pageNumber, entry.isIntersecting);
+        });
+      },
+      {
+        rootMargin: '0px 0px 0px 0px',
+      }
+    );
+
     const currentRef = containerRef.current;
     if (currentRef) {
-      observer.observe(currentRef);
+      preloadObserver.observe(currentRef);
+      viewportObserver.observe(currentRef);
     }
 
     return () => {
       if (currentRef) {
-        observer.unobserve(currentRef);
+        preloadObserver.unobserve(currentRef);
+        viewportObserver.unobserve(currentRef);
       }
-      observer.disconnect();
+      preloadObserver.disconnect();
+      viewportObserver.disconnect();
     };
   }, [pageNumber, onVisible]);
 
@@ -1056,9 +1073,12 @@ function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible }
         const context = canvas?.getContext('2d');
 
         if (canvas && context) {
-          const desiredWidth = Math.min(window.innerWidth - 32, 800) * zoom;
+          const desiredWidth = Math.min(windowWidth - 32, 800) * zoom;
           const unscaledViewport = page.getViewport({ scale: 1 });
-          const outputScale = Math.min(Math.max(window.devicePixelRatio || 1, 2.0), 3.0);
+          const outputScale = Math.min(
+            Math.max((typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1, 2.0),
+            3.0
+          );
           const scale = (desiredWidth / unscaledViewport.width) * outputScale;
           const viewport = page.getViewport({ scale });
 
@@ -1098,9 +1118,9 @@ function ScrollModePage({ pageNumber, pdfDoc, zoom, pageAspectRatio, onVisible }
         renderTaskRef.current = null;
       }
     };
-  }, [isVisible, pdfDoc, pageNumber, zoom]);
+  }, [isVisible, pdfDoc, pageNumber, zoom, windowWidth]);
 
-  const desiredWidth = Math.min(window.innerWidth - 32, 800) * zoom;
+  const desiredWidth = Math.min(windowWidth - 32, 800) * zoom;
   const height = desiredWidth * pageAspectRatio;
 
   return (

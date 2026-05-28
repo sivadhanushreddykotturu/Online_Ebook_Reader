@@ -1,28 +1,10 @@
 import mongoose from 'mongoose';
-import dynamic from 'next/dynamic';
 import Script from 'next/script';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import { Book } from '@/models/Book';
-
-const ReaderComponent = dynamic(() => import('./ReaderComponent'), {
-  ssr: false,
-  loading: () => (
-    <div style={{
-      color: '#888',
-      padding: '40px',
-      fontSize: '14px',
-      background: '#191919',
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center'
-    }}>
-      Loading reader…
-    </div>
-  )
-});
+import ReaderComponent from './ReaderComponent';
 
 export default async function ReaderPage({ params }: { params: { bookId: string } }) {
   const session = await auth();

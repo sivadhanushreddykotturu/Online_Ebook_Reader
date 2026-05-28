@@ -35,6 +35,15 @@ export default function LibraryDashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const cached = localStorage.getItem('library-books-cache');
+    if (cached) {
+      try {
+        setBooks(JSON.parse(cached));
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Failed to parse cached library:', err);
+      }
+    }
     fetchBooks();
   }, []);
 
@@ -54,15 +63,19 @@ export default function LibraryDashboard() {
   }, []);
 
   async function fetchBooks() {
-    setIsLoading(true);
+    const cached = localStorage.getItem('library-books-cache');
+    if (!cached) {
+      setIsLoading(true);
+    }
     try {
       const res = await fetch('/api/books');
       if (res.ok) {
         const data = await res.json();
         setBooks(data);
+        localStorage.setItem('library-books-cache', JSON.stringify(data));
       }
-    } catch (e) {
-      console.error('Failed to fetch books:', e);
+    } catch (err) {
+      console.error('Failed to fetch books:', err);
     } finally {
       setIsLoading(false);
     }
@@ -172,7 +185,9 @@ export default function LibraryDashboard() {
       });
       if (res.ok) {
         const updated = await res.json();
-        setBooks(books.map(b => b._id === bookId ? { ...b, title: updated.title } : b));
+        const updatedBooks = books.map(b => b._id === bookId ? { ...b, title: updated.title } : b);
+        setBooks(updatedBooks);
+        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
       }
     } catch (err) {
       console.error(err);
@@ -188,7 +203,9 @@ export default function LibraryDashboard() {
         method: 'DELETE',
       });
       if (res.ok) {
-        setBooks(books.filter(b => b._id !== bookId));
+        const updatedBooks = books.filter(b => b._id !== bookId);
+        setBooks(updatedBooks);
+        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
       } else {
         const errData = await res.json();
         alert(`Failed to delete book: ${errData.error || 'Unknown error'}`);
