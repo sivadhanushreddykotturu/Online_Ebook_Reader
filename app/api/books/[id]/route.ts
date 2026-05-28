@@ -4,6 +4,32 @@ import { connectDB } from '@/lib/mongodb';
 import { Book } from '@/models/Book';
 import { deleteFromR2 } from '@/lib/r2';
 
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await auth();
+
+    if (!session || !session.user || !session.user.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await connectDB();
+
+    const book = await Book.findOne({ _id: params.id, userId: session.user.id });
+
+    if (!book) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(book);
+  } catch (error) {
+    console.error('Fetch book error:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }

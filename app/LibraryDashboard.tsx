@@ -41,6 +41,10 @@ export default function LibraryDashboard() {
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [editTitleVal, setEditTitleVal] = useState<string>('');
 
+  // Custom Alert and Confirm States
+  const [customAlert, setCustomAlert] = useState<{ message: string; title?: string } | null>(null);
+  const [customConfirm, setCustomConfirm] = useState<{ message: string; onConfirm: () => void; title?: string } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,6 +58,20 @@ export default function LibraryDashboard() {
       }
     }
     fetchBooks();
+
+    const handleSync = () => {
+      if (document.visibilityState === 'visible') {
+        fetchBooks();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
   }, []);
 
   // Click outside to close dropdowns
@@ -94,7 +112,10 @@ export default function LibraryDashboard() {
   const handleFileChange = async (file: File | undefined) => {
     if (!file) return;
     if (file.type !== 'application/pdf') {
-      alert('Only PDF files are allowed');
+      setCustomAlert({
+        title: 'Invalid File Type',
+        message: 'Only PDF files are allowed.',
+      });
       return;
     }
     setSelectedFile(file);
@@ -124,7 +145,10 @@ export default function LibraryDashboard() {
     } catch (err) {
       console.error('Error parsing PDF:', err);
       const errMsg = err instanceof Error ? err.message : String(err);
-      alert(`Error detecting pages: ${errMsg}`);
+      setCustomAlert({
+        title: 'PDF Parsing Error',
+        message: `Error detecting pages: ${errMsg}`,
+      });
     } finally {
       setIsDetectingPages(false);
     }
@@ -205,25 +229,34 @@ export default function LibraryDashboard() {
   };
 
   const handleConfirmDelete = async (bookId: string, title: string) => {
-    const confirmed = confirm(`Are you sure you want to delete "${title}"? This will permanently delete the file from both storage and library database.`);
-    if (!confirmed) return;
-
-    try {
-      const res = await fetch(`/api/books/${bookId}`, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        const updatedBooks = books.filter(b => b._id !== bookId);
-        setBooks(updatedBooks);
-        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
-      } else {
-        const errData = await res.json();
-        alert(`Failed to delete book: ${errData.error || 'Unknown error'}`);
-      }
-    } catch (err) {
-      console.error('Delete error:', err);
-      alert('An error occurred while deleting the book.');
-    }
+    setCustomConfirm({
+      title: 'Delete Book',
+      message: `Are you sure you want to delete "${title}"? This will permanently delete the file from both storage and your library database.`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/books/${bookId}`, {
+            method: 'DELETE',
+          });
+          if (res.ok) {
+            const updatedBooks = books.filter(b => b._id !== bookId);
+            setBooks(updatedBooks);
+            localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
+          } else {
+            const errData = await res.json();
+            setCustomAlert({
+              title: 'Delete Failed',
+              message: `Failed to delete book: ${errData.error || 'Unknown error'}`,
+            });
+          }
+        } catch (err) {
+          console.error('Delete error:', err);
+          setCustomAlert({
+            title: 'Error',
+            message: 'An error occurred while deleting the book.',
+          });
+        }
+      },
+    });
   };
 
   // Logic to allow closing modal if it hasn't uploaded yet OR if an error happened
@@ -629,6 +662,129 @@ export default function LibraryDashboard() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {customAlert && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            background: '#202020',
+            border: '1px solid #2f2f2f',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '360px',
+            maxWidth: '90vw',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 500 }}>
+              {customAlert.title || 'Notification'}
+            </div>
+            <div style={{ color: '#aaa', fontSize: '14px', lineHeight: '1.5' }}>
+              {customAlert.message}
+            </div>
+            <button
+              onClick={() => setCustomAlert(null)}
+              style={{
+                marginTop: '8px',
+                background: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                color: '#000000',
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirm Modal */}
+      {customConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            background: '#202020',
+            border: '1px solid #2f2f2f',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '360px',
+            maxWidth: '90vw',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 500 }}>
+              {customConfirm.title || 'Confirm Action'}
+            </div>
+            <div style={{ color: '#aaa', fontSize: '14px', lineHeight: '1.5' }}>
+              {customConfirm.message}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '8px' }}>
+              <button
+                onClick={() => setCustomConfirm(null)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #2f2f2f',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  customConfirm.onConfirm();
+                  setCustomConfirm(null);
+                }}
+                style={{
+                  background: '#ff5555',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Confirm
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -36,12 +36,21 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const [book] = useState<Book>(initialBook);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [pageNumber, setPageNumber] = useState<number>(initialBook.currentPage || 1);
+  const [pageNumber, setPageNumber] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const localSaved = localStorage.getItem(`book-progress-${initialBook._id}`);
+      if (localSaved) {
+        return parseInt(localSaved, 10);
+      }
+    }
+    return initialBook.currentPage || 1;
+  });
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('Loading PDF...');
   const [renderingPage, setRenderingPage] = useState(false);
   const [isEditingPage, setIsEditingPage] = useState(false);
   const [inputPageVal, setInputPageVal] = useState('');
+  const [customAlert, setCustomAlert] = useState<{ message: string; title?: string } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderTaskRef = useRef<PDFRenderTask | null>(null);
@@ -135,7 +144,10 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         }
         if (active && !isAbort) {
           const msg = err instanceof Error ? err.message : String(err);
-          alert('Failed to load PDF document: ' + msg + '\nCheck browser console for more details.');
+          setCustomAlert({
+            title: 'Failed to load PDF',
+            message: `Failed to load PDF document: ${msg}. Check browser console for more details.`,
+          });
         }
       }
     }
@@ -229,6 +241,9 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     const fileKey = book.r2Key;
     const initialTotal = book.totalPages || 0;
 
+    // Save to local storage instantly (never loses progress on this device)
+    localStorage.setItem(`book-progress-${book._id}`, pageNumber.toString());
+
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -253,6 +268,44 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, [pageNumber, book, numPages, loading]);
+
+  // Sync page index from server in the background when app becomes visible or focused
+  useEffect(() => {
+    if (!book) return;
+
+    const syncPageOnResume = async () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          const res = await fetch(`/api/books/${book._id}`);
+          if (res.ok) {
+            const latestBook = await res.json();
+            if (latestBook && typeof latestBook.currentPage === 'number') {
+              setPageNumber((current) => {
+                if (current !== latestBook.currentPage) {
+                  localStorage.setItem(`book-progress-${book._id}`, latestBook.currentPage.toString());
+                  return latestBook.currentPage;
+                }
+                return current;
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to sync reader progress from server on resume:', err);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', syncPageOnResume);
+    window.addEventListener('focus', syncPageOnResume);
+    
+    // Also perform a background check once on mount (in case initial state loaded is cached)
+    syncPageOnResume();
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncPageOnResume);
+      window.removeEventListener('focus', syncPageOnResume);
+    };
+  }, [book]);
 
   useEffect(() => {
     if (!pdfDoc || pageNumber >= (numPages || 0)) return;
@@ -990,6 +1043,59 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
           </>
         )}
       </div>
+
+      {/* Custom Alert Modal */}
+      {customAlert && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            background: '#202020',
+            border: '1px solid #2f2f2f',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '320px',
+            maxWidth: '90vw',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 500 }}>
+              {customAlert.title || 'Notification'}
+            </div>
+            <div style={{ color: '#aaa', fontSize: '14px', lineHeight: '1.5' }}>
+              {customAlert.message}
+            </div>
+            <button
+              onClick={() => setCustomAlert(null)}
+              style={{
+                marginTop: '8px',
+                background: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                color: '#000000',
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

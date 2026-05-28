@@ -18,6 +18,7 @@ export default function UserMenu({ user }: UserMenuProps) {
   );
   const [isChangingAvatar, setIsChangingAvatar] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{ message: string; title?: string } | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Sync avatar from DB on mount
@@ -57,11 +58,17 @@ export default function UserMenu({ user }: UserMenuProps) {
           setAvatarUrl(data.image);
         }
       } else {
-        alert('Failed to update avatar. Please try again.');
+        setCustomAlert({
+          title: 'Update Failed',
+          message: 'Failed to update avatar. Please try again.',
+        });
       }
     } catch (err) {
       console.error('Error changing avatar:', err);
-      alert('Network error updating avatar.');
+      setCustomAlert({
+        title: 'Error',
+        message: 'Network error updating avatar.',
+      });
     } finally {
       setIsChangingAvatar(false);
     }
@@ -70,6 +77,14 @@ export default function UserMenu({ user }: UserMenuProps) {
   const handleSignOut = async () => {
     setIsSigningOut(true);
     try {
+      // Clear local IndexedDB PDF cache
+      try {
+        const { deleteDB } = await import('idb');
+        await deleteDB('pdf-cache');
+      } catch (dbErr) {
+        console.warn('Failed to clear IndexedDB pdf-cache:', dbErr);
+      }
+
       await signOut({ callbackUrl: '/' });
     } catch (err) {
       console.error('Error signing out:', err);
@@ -204,6 +219,59 @@ export default function UserMenu({ user }: UserMenuProps) {
               />
             )}
           </button>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {customAlert && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            background: '#202020',
+            border: '1px solid #2f2f2f',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '320px',
+            maxWidth: '90vw',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ color: '#ffffff', fontSize: '16px', fontWeight: 500 }}>
+              {customAlert.title || 'Notification'}
+            </div>
+            <div style={{ color: '#aaa', fontSize: '14px', lineHeight: '1.5' }}>
+              {customAlert.message}
+            </div>
+            <button
+              onClick={() => setCustomAlert(null)}
+              style={{
+                marginTop: '8px',
+                background: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                color: '#000000',
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}
+            >
+              OK
+            </button>
+          </div>
         </div>
       )}
 

@@ -12,11 +12,12 @@ export async function POST() {
 
     await connectDB();
 
-    const query = session.user.id
-      ? { _id: session.user.id }
-      : { email: session.user.email };
+    const email = session.user.email?.toLowerCase().trim();
+    if (!email) {
+      return NextResponse.json({ error: 'User email not found in session' }, { status: 400 });
+    }
 
-    const user = await User.findOne(query);
+    const user = await User.findOne({ email });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
