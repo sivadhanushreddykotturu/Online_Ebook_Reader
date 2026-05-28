@@ -20,6 +20,7 @@ function smoothProgress(realPercent: number): number {
 export async function uploadBook(
   file: File,
   totalPages: number,
+  coverBlob: Blob | null,
   callbacks: UploadCallbacks
 ): Promise<UploadResult> {
   const { onStatus, onProgress } = callbacks;
@@ -31,6 +32,9 @@ export async function uploadBook(
   formData.append('file', file);
   formData.append('title', file.name);
   formData.append('totalPages', totalPages.toString());
+  if (coverBlob) {
+    formData.append('cover', coverBlob, 'cover.jpg');
+  }
 
   const result = await new Promise<UploadResult>((resolve, reject) => {
     const xhr = new XMLHttpRequest();

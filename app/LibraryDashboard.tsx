@@ -12,7 +12,130 @@ interface Book {
   currentPage: number;
   totalPages: number;
   updatedAt: string;
+  coverKey?: string;
+  customCoverStyle?: string;
 }
+
+interface MiniPDFPage {
+  getViewport: (options: { scale: number }) => { width: number; height: number };
+  render: (options: { canvasContext: CanvasRenderingContext2D; viewport: unknown }) => { promise: Promise<void> };
+}
+
+interface MiniPDFDocument {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<MiniPDFPage>;
+}
+
+const COVER_PRESETS = [
+  { id: 'gradient-sunset', name: 'Deep Sunset', style: 'linear-gradient(135deg, #ff5e62, #ff9966)' },
+  { id: 'gradient-ocean', name: 'Ocean Breeze', style: 'linear-gradient(135deg, #2b5876, #4e4376)' },
+  { id: 'gradient-forest', name: 'Midnight Forest', style: 'linear-gradient(135deg, #11998e, #38ef7d)' },
+  { id: 'gradient-twilight', name: 'Purple Twilight', style: 'linear-gradient(135deg, #0f2027, #2c5364)' },
+  { id: 'gradient-berry', name: 'Wild Berry', style: 'linear-gradient(135deg, #834d9b, #d04ed6)' },
+  { id: 'gradient-nebula', name: 'Cosmic Nebula', style: 'linear-gradient(135deg, #f857a6, #ff5858)' },
+];
+
+async function extractCoverBlob(pdf: MiniPDFDocument): Promise<Blob> {
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 1.0 });
+  const targetWidth = 200;
+  const scale = targetWidth / viewport.width;
+  const scaledViewport = page.getViewport({ scale });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.floor(scaledViewport.width);
+  canvas.height = Math.floor(scaledViewport.height);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('Failed to get 2D context');
+  }
+
+  await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('Failed to convert canvas to blob'));
+    }, 'image/jpeg', 0.85);
+  });
+}
+
+function BookCoverDisplay({ book }: { book: Book }) {
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [book.coverKey, book.customCoverStyle]);
+
+  const preset = COVER_PRESETS.find((p) => p.id === book.customCoverStyle);
+  const backgroundStyle = preset ? preset.style : 'linear-gradient(135deg, #252525, #191919)';
+  const showFallback = !book.coverKey || imgError;
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        aspectRatio: '2/3',
+        borderRadius: '4px',
+        overflow: 'hidden',
+        position: 'relative',
+        background: '#151515',
+        boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+        border: '1px solid #ffffff08',
+        marginBottom: '4px',
+      }}
+    >
+      {showFallback ? (
+        <div
+          style={{
+            width: '100%',
+            height: '100%',
+            background: backgroundStyle,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box',
+            textAlign: 'center',
+            color: '#ffffff',
+            userSelect: 'none',
+          }}
+        >
+          <div style={{ fontSize: '32px', marginBottom: '8px', opacity: 0.7 }}>📖</div>
+          <div
+            style={{
+              fontSize: '13px',
+              fontWeight: 500,
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              lineHeight: '1.4',
+              opacity: 0.9,
+            }}
+          >
+            {book.title}
+          </div>
+        </div>
+      ) : (
+        <img
+          src={`/api/books/${book._id}/cover`}
+          alt={book.title}
+          onError={() => setImgError(true)}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 
 export default function LibraryDashboard() {
   const [books, setBooks] = useState<Book[]>([]);
@@ -26,6 +149,14 @@ export default function LibraryDashboard() {
   const [isDetectingPages, setIsDetectingPages] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string>('');
+  const [selectedCoverBlob, setSelectedCoverBlob] = useState<Blob | null>(null);
+
+  // Custom cover states
+  const [customizingBook, setCustomizingBook] = useState<Book | null>(null);
+  const [customCoverFile, setCustomCoverFile] = useState<File | null>(null);
+  const [extractPageNum, setExtractPageNum] = useState<number>(1);
+  const [isUpdatingCover, setIsUpdatingCover] = useState(false);
+  const [coverStatus, setCoverStatus] = useState('');
 
   // Dropdown & Rename States
   const [activeDropdownBookId, setActiveDropdownBookId] = useState<string | null>(null);
@@ -93,12 +224,13 @@ export default function LibraryDashboard() {
     setIsDetectingPages(true);
     setUploadStatus('');
     setUploadProgress(null);
+    setSelectedCoverBlob(null);
 
     try {
       const pdfjs = (window as unknown as {
         pdfjsLib?: {
           GlobalWorkerOptions: { workerSrc: string };
-          getDocument: (url: string) => { promise: Promise<{ numPages: number }> };
+          getDocument: (url: string) => { promise: Promise<MiniPDFDocument> };
         };
       }).pdfjsLib;
       if (!pdfjs) {
@@ -110,6 +242,15 @@ export default function LibraryDashboard() {
       const loadingTask = pdfjs.getDocument(fileURL);
       const pdf = await loadingTask.promise;
       setDetectedPages(pdf.numPages);
+
+      // Auto-extract cover blob
+      try {
+        const cover = await extractCoverBlob(pdf);
+        setSelectedCoverBlob(cover);
+      } catch (coverErr) {
+        console.error('Error generating PDF cover preview:', coverErr);
+      }
+
       URL.revokeObjectURL(fileURL);
     } catch (err) {
       console.error('Error parsing PDF:', err);
@@ -148,7 +289,7 @@ export default function LibraryDashboard() {
     setUploadStatus('');
 
     try {
-      await uploadBook(selectedFile, detectedPages, {
+      await uploadBook(selectedFile, detectedPages, selectedCoverBlob, {
         onStatus: (status) => setUploadStatus(status),
         onProgress: (percent) => setUploadProgress(percent),
       });
@@ -161,6 +302,7 @@ export default function LibraryDashboard() {
         setIsModalOpen(false);
         setSelectedFile(null);
         setDetectedPages(null);
+        setSelectedCoverBlob(null);
         setUploadProgress(null);
         setUploadStatus('');
       }, 1500);
@@ -213,6 +355,142 @@ export default function LibraryDashboard() {
     } catch (err) {
       console.error('Delete error:', err);
       alert('An error occurred while deleting the book.');
+    }
+  };
+
+  // Preset Selection Cover update
+  const handleSelectPreset = async (bookId: string, presetId: string) => {
+    setIsUpdatingCover(true);
+    setCoverStatus('Saving preset...');
+    try {
+      const res = await fetch(`/api/books/${bookId}/cover`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ presetId }),
+      });
+      if (res.ok) {
+        const updatedBooks = books.map(b => b._id === bookId ? { ...b, coverKey: undefined, customCoverStyle: presetId } : b);
+        setBooks(updatedBooks);
+        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
+        setCustomizingBook(null);
+      } else {
+        alert('Failed to update preset');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An error occurred');
+    } finally {
+      setIsUpdatingCover(false);
+    }
+  };
+
+  // Upload Custom Cover
+  const handleUploadCustomCover = async (bookId: string) => {
+    if (!customCoverFile) return;
+    setIsUpdatingCover(true);
+    setCoverStatus('Uploading cover image...');
+    
+    const formData = new FormData();
+    formData.append('cover', customCoverFile);
+
+    try {
+      const res = await fetch(`/api/books/${bookId}/cover`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updatedBooks = books.map(b => b._id === bookId ? { ...b, coverKey: data.coverKey, customCoverStyle: undefined } : b);
+        setBooks(updatedBooks);
+        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
+        setCustomizingBook(null);
+      } else {
+        alert('Failed to upload custom cover');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An error occurred during upload');
+    } finally {
+      setIsUpdatingCover(false);
+    }
+  };
+
+  // Generate cover from specific PDF page
+  const handleExtractFromPage = async (bookId: string, pageNum: number) => {
+    setIsUpdatingCover(true);
+    setCoverStatus(`Downloading PDF and rendering page ${pageNum}...`);
+    
+    try {
+      // 1. Fetch PDF buffer
+      const pdfRes = await fetch(`/api/pdf/${bookId}`);
+      if (!pdfRes.ok) throw new Error('Failed to fetch PDF file');
+      const arrayBuffer = await pdfRes.arrayBuffer();
+
+      // 2. Load using PDF.js
+      const pdfjs = (window as unknown as {
+        pdfjsLib?: {
+          getDocument: (options: { data: Uint8Array }) => { promise: Promise<MiniPDFDocument> };
+        };
+      }).pdfjsLib;
+      if (!pdfjs) throw new Error('PDF.js library not loaded yet');
+      
+      const loadingTask = pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) });
+      const pdf = await loadingTask.promise;
+      
+      if (pageNum < 1 || pageNum > pdf.numPages) {
+        throw new Error(`Invalid page number. Page must be between 1 and ${pdf.numPages}.`);
+      }
+
+      setCoverStatus(`Extracting page ${pageNum}...`);
+      
+      // 3. Extract cover blob from page
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.0 });
+      const targetWidth = 200;
+      const scale = targetWidth / viewport.width;
+      const scaledViewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(scaledViewport.width);
+      canvas.height = Math.floor(scaledViewport.height);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Failed to get canvas 2D context');
+
+      await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+
+      const coverBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to create blob from canvas'));
+        }, 'image/jpeg', 0.85);
+      });
+
+      setCoverStatus('Uploading cover to server...');
+
+      // 4. Send cover to POST endpoint
+      const formData = new FormData();
+      formData.append('cover', coverBlob, `page-${pageNum}.jpg`);
+
+      const uploadRes = await fetch(`/api/books/${bookId}/cover`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (uploadRes.ok) {
+        const data = await uploadRes.json();
+        const updatedBooks = books.map(b => b._id === bookId ? { ...b, coverKey: data.coverKey, customCoverStyle: undefined } : b);
+        setBooks(updatedBooks);
+        localStorage.setItem('library-books-cache', JSON.stringify(updatedBooks));
+        setCustomizingBook(null);
+      } else {
+        alert('Failed to save extracted cover');
+      }
+    } catch (err) {
+      console.error(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert(errMsg || 'An error occurred during extraction');
+    } finally {
+      setIsUpdatingCover(false);
     }
   };
 
@@ -275,6 +553,9 @@ export default function LibraryDashboard() {
                   onMouseEnter={(e) => e.currentTarget.style.borderColor = '#ffffff30'}
                   onMouseLeave={(e) => e.currentTarget.style.borderColor = '#ffffff15'}
                 >
+                  {/* Book Cover Preview */}
+                  <BookCoverDisplay book={book} />
+
                   {/* Title & Actions Dropdown */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative' }}>
                     {editingBookId === book._id ? (
@@ -360,6 +641,30 @@ export default function LibraryDashboard() {
                             flexDirection: 'column',
                             padding: '4px 0',
                           }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCustomizingBook(book);
+                                setCustomCoverFile(null);
+                                setExtractPageNum(1);
+                                setCoverStatus('');
+                                setActiveDropdownBookId(null);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#ffffff',
+                                fontSize: '13px',
+                                padding: '8px 12px',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                width: '100%',
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#303030'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                            >
+                              Change Cover
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -573,6 +878,209 @@ export default function LibraryDashboard() {
                     <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#ffffff' }} />
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Customize Cover Modal */}
+      {customizingBook && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => {
+            if (!isUpdatingCover) setCustomizingBook(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#202020',
+              border: '1px solid #2f2f2f',
+              padding: '24px',
+              width: '450px',
+              maxWidth: '90vw',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#ffffff', fontSize: '15px', fontWeight: 500 }}>Customize Cover</span>
+              {!isUpdatingCover && (
+                <button
+                  onClick={() => setCustomizingBook(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Preview and presets block */}
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+              {/* Cover Preview */}
+              <div style={{ width: '100px', flexShrink: 0 }}>
+                <BookCoverDisplay book={customizingBook} />
+              </div>
+              <div style={{ flexGrow: 1 }}>
+                <div style={{ color: '#ffffff', fontSize: '14px', marginBottom: '4px', fontWeight: 500 }}>
+                  {customizingBook.title}
+                </div>
+                <div style={{ color: '#888', fontSize: '12px' }}>
+                  Choose a preset gradient style, upload your own cover image, or render any page from this PDF.
+                </div>
+              </div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid #2f2f2f', margin: 0 }} />
+
+            {/* Presets Grid */}
+            <div>
+              <div style={{ color: '#ffffff', fontSize: '13px', marginBottom: '10px' }}>Select Preset Gradient</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                {COVER_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    disabled={isUpdatingCover}
+                    onClick={() => handleSelectPreset(customizingBook._id, preset.id)}
+                    style={{
+                      background: preset.style,
+                      border: customizingBook.customCoverStyle === preset.id ? '2px solid #ffffff' : '1px solid #ffffff15',
+                      borderRadius: '4px',
+                      color: '#ffffff',
+                      padding: '8px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      textAlign: 'center',
+                      fontWeight: 500,
+                      textShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                      height: '40px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {preset.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid #2f2f2f', margin: 0 }} />
+
+            {/* Custom Upload */}
+            <div>
+              <div style={{ color: '#ffffff', fontSize: '13px', marginBottom: '10px' }}>Upload Cover Image</div>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={isUpdatingCover}
+                  onChange={(e) => setCustomCoverFile(e.target.files?.[0] || null)}
+                  style={{
+                    background: '#151515',
+                    border: '1px solid #2f2f2f',
+                    color: '#888',
+                    padding: '6px',
+                    fontSize: '12px',
+                    flexGrow: 1,
+                    outline: 'none',
+                  }}
+                />
+                {customCoverFile && (
+                  <button
+                    disabled={isUpdatingCover}
+                    onClick={() => handleUploadCustomCover(customizingBook._id)}
+                    style={{
+                      border: '1px solid #2f2f2f',
+                      background: 'transparent',
+                      color: '#ffffff',
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Upload
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid #2f2f2f', margin: 0 }} />
+
+            {/* Dynamic Page Extraction */}
+            <div>
+              <div style={{ color: '#ffffff', fontSize: '13px', marginBottom: '4px' }}>Extract Page from PDF</div>
+              <div style={{ color: '#888', fontSize: '11px', marginBottom: '10px' }}>
+                Extract and render any page from this PDF to use as the cover.
+              </div>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <input
+                  type="number"
+                  min="1"
+                  max={customizingBook.totalPages || 9999}
+                  value={extractPageNum}
+                  disabled={isUpdatingCover}
+                  onChange={(e) => setExtractPageNum(parseInt(e.target.value, 10) || 1)}
+                  style={{
+                    background: '#151515',
+                    border: '1px solid #2f2f2f',
+                    color: '#ffffff',
+                    padding: '6px',
+                    fontSize: '12px',
+                    width: '60px',
+                    textAlign: 'center',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  disabled={isUpdatingCover}
+                  onClick={() => handleExtractFromPage(customizingBook._id, extractPageNum)}
+                  style={{
+                    border: '1px solid #2f2f2f',
+                    background: 'transparent',
+                    color: '#ffffff',
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    flexGrow: 1,
+                  }}
+                >
+                  Generate Cover
+                </button>
+              </div>
+            </div>
+
+            {/* Loading/status messages */}
+            {coverStatus && (
+              <div style={{
+                background: '#151515',
+                border: '1px solid #2f2f2f',
+                padding: '10px',
+                fontSize: '12px',
+                color: '#888',
+                textAlign: 'center',
+              }}>
+                {coverStatus}
               </div>
             )}
           </div>

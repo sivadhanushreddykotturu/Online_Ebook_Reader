@@ -9,6 +9,8 @@ export interface BookDocument extends Document {
   expiresAt: Date | null;
   isVip: boolean;
   notified7Days: boolean;
+  coverKey?: string;
+  customCoverStyle?: string;
   uploadedAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,8 @@ const BookSchema = new Schema<BookDocument>(
     expiresAt: { type: Date, default: null },
     isVip: { type: Boolean, default: false, required: true },
     notified7Days: { type: Boolean, default: false, required: true },
+    coverKey: { type: String, default: null },
+    customCoverStyle: { type: String, default: null },
   },
   {
     timestamps: { createdAt: 'uploadedAt', updatedAt: 'updatedAt' },
