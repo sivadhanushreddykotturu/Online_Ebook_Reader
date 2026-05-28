@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/expire-books",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/warn-expiry",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
