@@ -115,6 +115,11 @@ export default function LibraryDashboard() {
         const data = await res.json();
         setBooks(data);
         localStorage.setItem('library-books-cache', JSON.stringify(data));
+        
+        // Prefetch reader pages for offline caching
+        data.forEach((book: Book) => {
+          fetch(`/reader/${book._id}`).catch(() => {});
+        });
       }
     } catch (err) {
       console.error('Failed to fetch books:', err);

@@ -64,12 +64,13 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((networkResponse) => {
-        // Cache static JS/CSS bundles and asset files
+        // Cache static JS/CSS bundles, asset files, and dynamic page navigations
         if (
           networkResponse.status === 200 &&
           (event.request.url.includes('/_next/static/') ||
             event.request.url.includes('/icons/') ||
-            event.request.url.includes('/lib/'))
+            event.request.url.includes('/lib/') ||
+            event.request.mode === 'navigate')
         ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
