@@ -45,7 +45,7 @@ export default async function ReaderPage({ params }: { params: { bookId: string 
       <link rel="stylesheet" href="/lib/pdf_viewer.css" />
       <Script
         src="/lib/pdf.min.js"
-        strategy="beforeInteractive"
+        strategy="afterInteractive"
       />
       <ReaderComponent initialBook={initialBook} />
     </>

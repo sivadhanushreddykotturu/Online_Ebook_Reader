@@ -48,23 +48,28 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const [book] = useState<Book>(initialBook);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [pageNumber, setPageNumber] = useState<number>(() => {
+  const [pageNumber, setPageNumber] = useState<number>(initialBook.currentPage || 1);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       const queryPage = searchParams.get('page');
       if (queryPage) {
         const parsed = parseInt(queryPage, 10);
         if (!isNaN(parsed) && parsed >= 1) {
-          return parsed;
+          setPageNumber(parsed);
+          return;
         }
       }
       const localSaved = localStorage.getItem(`book-progress-${initialBook._id}`);
       if (localSaved) {
-        return parseInt(localSaved, 10);
+        const parsedLocal = parseInt(localSaved, 10);
+        if (!isNaN(parsedLocal) && parsedLocal >= 1) {
+          setPageNumber(parsedLocal);
+        }
       }
     }
-    return initialBook.currentPage || 1;
-  });
+  }, [initialBook._id]);
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState('Loading PDF...');
   const [renderingPage, setRenderingPage] = useState(false);

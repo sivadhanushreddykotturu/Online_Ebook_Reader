@@ -64,7 +64,12 @@ export default function LibraryDashboard() {
     const cached = localStorage.getItem('library-books-cache');
     if (cached) {
       try {
-        setBooks(JSON.parse(cached));
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          setBooks(parsed);
+        } else {
+          setBooks([]);
+        }
         setIsLoading(false);
       } catch (err) {
         console.error('Failed to parse cached library:', err);
