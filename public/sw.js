@@ -47,10 +47,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Use Network-First strategy for HTML page navigations to ensure fresh auth state
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return networkResponse;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cachedResponse) => {
+            return cachedResponse || caches.match('/');
+          });
+        })
+    );
+    return;
+  }
+
+  // Use Stale-While-Revalidate for static assets (JS, CSS, images)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Stale-While-Revalidate: fetch network in background to update cache
+        // Fetch network in background to update cache
         fetch(event.request)
           .then((networkResponse) => {
             if (networkResponse.status === 200) {
@@ -64,13 +85,11 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((networkResponse) => {
-        // Cache static JS/CSS bundles, asset files, and dynamic page navigations
         if (
           networkResponse.status === 200 &&
           (event.request.url.includes('/_next/static/') ||
             event.request.url.includes('/icons/') ||
-            event.request.url.includes('/lib/') ||
-            event.request.mode === 'navigate')
+            event.request.url.includes('/lib/'))
         ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -78,12 +97,6 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
-      }).catch((err) => {
-        // If offline and a navigation request fails, serve index page from cache
-        if (event.request.mode === 'navigate') {
-          return caches.match('/') || Promise.reject(err);
-        }
-        throw err;
       });
     })
   );
