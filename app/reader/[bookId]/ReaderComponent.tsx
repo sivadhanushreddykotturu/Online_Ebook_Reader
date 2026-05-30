@@ -711,65 +711,14 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     if (e.touches.length === 1) {
       touchStartXRef.current = e.touches[0].clientX;
       touchStartYRef.current = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-      if (e.cancelable) e.preventDefault();
-      // Clear single finger flags to prevent page flip or double-tap on release
-      touchStartXRef.current = null;
-      touchStartYRef.current = null;
-      
-      const t1 = e.touches[0];
-      const t2 = e.touches[1];
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      touchStartDistRef.current = dist;
-      touchStartZoomRef.current = zoom;
-      
-      const container = scrollContainerRef.current;
-      if (container) {
-        const containerRect = container.getBoundingClientRect();
-        touchStartMidYViewportRef.current = (t1.clientY + t2.clientY) / 2 - containerRect.top;
-      }
-      
-      const targetEl = zoomTargetRef.current;
-      if (targetEl) {
-        const rect = targetEl.getBoundingClientRect();
-        const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
-        const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
-        targetEl.style.transformOrigin = `${midX}px ${midY}px`;
-      }
     }
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 2 && touchStartDistRef.current !== null) {
-      if (e.cancelable) e.preventDefault();
-      const t1 = e.touches[0];
-      const t2 = e.touches[1];
-      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      const factor = dist / touchStartDistRef.current;
-      
-      const targetZoom = Math.min(Math.max(touchStartZoomRef.current * factor, 0.5), 3.0);
-      
-      const targetEl = zoomTargetRef.current;
-      if (targetEl) {
-        targetEl.style.transform = `scale(${factor})`;
-      }
-      gestureZoomRef.current = targetZoom;
-    }
+    // Native pinch-zoom handles zooming now, so we don't prevent default.
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    const targetEl = zoomTargetRef.current;
-    if (targetEl) {
-      targetEl.style.transform = '';
-      targetEl.style.transformOrigin = '';
-    }
-
-    if (gestureZoomRef.current !== null) {
-      performZoom(gestureZoomRef.current, touchStartMidYViewportRef.current);
-      gestureZoomRef.current = null;
-      touchStartDistRef.current = null;
-      return;
-    }
 
     if (touchStartXRef.current === null || touchStartYRef.current === null) return;
     
@@ -931,7 +880,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
           paddingBottom: isMobile ? '120px' : '80px',
           display: 'flex',
           flexDirection: 'column',
-          touchAction: isMobile ? 'pan-x pan-y' : 'auto',
+          touchAction: 'auto',
         }}
       >
         {loading ? (
