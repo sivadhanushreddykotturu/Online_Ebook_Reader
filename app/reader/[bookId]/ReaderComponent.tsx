@@ -84,6 +84,8 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const renderTaskRef = useRef<PDFRenderTask | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const touchStartMidYViewportRef = useRef<number>(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoom, setZoom] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<'single' | 'split' | 'scroll'>('single');
@@ -627,6 +629,37 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
   }, []);
 
+  const performZoom = useCallback((newZoom: number, focusYViewport?: number) => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      setZoom(newZoom);
+      return;
+    }
+
+    const oldZoom = zoom;
+    const oldScrollTop = container.scrollTop;
+    const containerRect = container.getBoundingClientRect();
+    const yFocus = focusYViewport !== undefined ? focusYViewport : containerRect.height / 2;
+    
+    setZoom(newZoom);
+    
+    if (viewMode === 'scroll') {
+      const ratio = newZoom / oldZoom;
+      const targetScrollTop = oldScrollTop * ratio + yFocus * (ratio - 1);
+      setTimeout(() => {
+        container.scrollTop = targetScrollTop;
+      }, 50);
+    }
+  }, [zoom, viewMode]);
+
+  const handleZoomIn = () => {
+    performZoom(Math.min(zoom + 0.2, 3.0));
+  };
+
+  const handleZoomOut = () => {
+    performZoom(Math.max(zoom - 0.2, 0.5));
+  };
+
   useEffect(() => {
     function handleGlobalKeyDown(e: KeyboardEvent) {
       if (document.activeElement?.tagName === 'INPUT') {
@@ -637,16 +670,16 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
       } else if (e.key === 'ArrowRight') {
         handleNextPage();
       } else if (e.key === '=' || e.key === '+') {
-        setZoom((prev) => Math.min(prev + 0.2, 3.0));
+        performZoom(Math.min(zoom + 0.2, 3.0));
       } else if (e.key === '-') {
-        setZoom((prev) => Math.max(prev - 0.2, 0.5));
+        performZoom(Math.max(zoom - 0.2, 0.5));
       }
     }
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [handlePrevPage, handleNextPage]);
+  }, [handlePrevPage, handleNextPage, zoom, performZoom]);
 
   useEffect(() => {
     function handleFullscreenChange() {
@@ -669,13 +702,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
   };
 
-  const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev + 0.2, 3.0));
-  };
 
-  const handleZoomOut = () => {
-    setZoom((prev) => Math.max(prev - 0.2, 0.5));
-  };
 
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
@@ -686,11 +713,29 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
       touchStartYRef.current = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
       if (e.cancelable) e.preventDefault();
+      // Clear single finger flags to prevent page flip or double-tap on release
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      
       const t1 = e.touches[0];
       const t2 = e.touches[1];
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
       touchStartDistRef.current = dist;
       touchStartZoomRef.current = zoom;
+      
+      const container = scrollContainerRef.current;
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        touchStartMidYViewportRef.current = (t1.clientY + t2.clientY) / 2 - containerRect.top;
+      }
+      
+      const targetEl = zoomTargetRef.current;
+      if (targetEl) {
+        const rect = targetEl.getBoundingClientRect();
+        const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+        targetEl.style.transformOrigin = `${midX}px ${midY}px`;
+      }
     }
   };
 
@@ -707,7 +752,6 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
       const targetEl = zoomTargetRef.current;
       if (targetEl) {
         targetEl.style.transform = `scale(${factor})`;
-        targetEl.style.transformOrigin = 'center center';
       }
       gestureZoomRef.current = targetZoom;
     }
@@ -721,7 +765,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
 
     if (gestureZoomRef.current !== null) {
-      setZoom(gestureZoomRef.current);
+      performZoom(gestureZoomRef.current, touchStartMidYViewportRef.current);
       gestureZoomRef.current = null;
       touchStartDistRef.current = null;
       return;
@@ -734,18 +778,22 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     const moveDist = Math.hypot(deltaX, deltaY);
 
     if (moveDist < 8) {
-      
       const now = Date.now();
       if (now - lastTapTimeRef.current < 300) {
-        setZoom((prev) => (prev === 1.0 ? 2.0 : 1.0));
+        const container = scrollContainerRef.current;
+        let yFocus: number | undefined;
+        if (container && touchStartYRef.current !== null) {
+          const containerRect = container.getBoundingClientRect();
+          yFocus = touchStartYRef.current - containerRect.top;
+        }
+        
+        performZoom(zoom === 1.0 ? 2.0 : 1.0, yFocus);
         lastTapTimeRef.current = 0; 
       } else {
         lastTapTimeRef.current = now;
       }
     } else {
-
       if (zoom === 1.0) {
-        
         if (Math.abs(deltaX) > 60 && Math.abs(deltaX) > Math.abs(deltaY)) {
           if (deltaX < 0) {
             handleNextPage();
@@ -871,6 +919,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
       </button>
 
       <div
+        ref={scrollContainerRef}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

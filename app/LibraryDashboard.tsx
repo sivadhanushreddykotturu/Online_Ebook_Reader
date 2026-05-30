@@ -394,17 +394,17 @@ export default function LibraryDashboard() {
               setIsModalOpen(true);
             }}
             style={{
-              border: isOnline ? '1px solid #2f2f2f' : '1px solid #2f2f2f50',
+              border: (!mounted || isOnline) ? '1px solid #2f2f2f' : '1px solid #2f2f2f50',
               background: 'transparent',
-              color: isOnline ? '#ffffff' : '#ffffff50',
+              color: (!mounted || isOnline) ? '#ffffff' : '#ffffff50',
               padding: '8px 16px',
               fontSize: '14px',
-              cursor: isOnline ? 'pointer' : 'not-allowed',
+              cursor: (!mounted || isOnline) ? 'pointer' : 'not-allowed',
               fontFamily: 'inherit',
               transition: 'background 0.15s ease',
             }}
             onMouseEnter={(e) => {
-              if (isOnline) e.currentTarget.style.background = '#202020';
+              if (!mounted || isOnline) e.currentTarget.style.background = '#202020';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = 'transparent';
