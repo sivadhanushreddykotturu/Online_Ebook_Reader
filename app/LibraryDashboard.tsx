@@ -89,6 +89,34 @@ export default function LibraryDashboard() {
     };
   }, [isOnline]);
 
+  // Sync offline reading progress to/from server automatically when online
+  useEffect(() => {
+    if (isOnline && books.length > 0) {
+      books.forEach(async (book) => {
+        const localVal = localStorage.getItem(`book-progress-${book._id}`);
+        const localPage = localVal ? parseInt(localVal, 10) : 0;
+        
+        if (localPage > book.currentPage) {
+          try {
+            await fetch('/api/books/progress', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                r2Key: book.r2Key,
+                currentPage: localPage,
+                totalPages: book.totalPages,
+              }),
+            });
+          } catch (err) {
+            console.warn(`Failed to sync offline progress for book ${book.title}:`, err);
+          }
+        } else if (localPage < book.currentPage && book.currentPage > 0) {
+          localStorage.setItem(`book-progress-${book._id}`, book.currentPage.toString());
+        }
+      });
+    }
+  }, [isOnline, books]);
+
   // Click outside to close dropdowns
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -432,7 +460,10 @@ export default function LibraryDashboard() {
             gap: '24px',
           }}>
             {books.map((book) => {
-              const pct = book.totalPages > 0 ? Math.round((book.currentPage / book.totalPages) * 100) : 0;
+              const localVal = mounted ? localStorage.getItem(`book-progress-${book._id}`) : null;
+              const localPage = localVal ? parseInt(localVal, 10) : 0;
+              const displayPage = Math.max(localPage, book.currentPage);
+              const pct = book.totalPages > 0 ? Math.round((displayPage / book.totalPages) * 100) : 0;
               return (
                 <div
                   key={book._id}
@@ -620,7 +651,7 @@ export default function LibraryDashboard() {
 
                     {/* Progress Info */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: '#888' }}>
-                      <span>📖 {book.currentPage} / {book.totalPages} pages</span>
+                      <span>📖 {displayPage} / {book.totalPages} pages</span>
                       <span>{pct}%</span>
                     </div>
 
