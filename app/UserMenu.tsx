@@ -85,7 +85,8 @@ export default function UserMenu({ user }: UserMenuProps) {
         console.warn('Failed to clear IndexedDB pdf-cache:', dbErr);
       }
 
-      await signOut({ callbackUrl: '/' });
+      await signOut({ redirect: false });
+      window.location.href = '/';
     } catch (err) {
       console.error('Error signing out:', err);
       setIsSigningOut(false);
