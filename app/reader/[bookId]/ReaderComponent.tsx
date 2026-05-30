@@ -295,13 +295,23 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
 
     async function loadPDF() {
       try {
-        const pdfjs = (window as unknown as {
+        let pdfjs = (window as unknown as {
           pdfjsLib?: {
             GlobalWorkerOptions: { workerSrc: string };
             getDocument: (source: string | { data: Uint8Array }) => { promise: Promise<PDFDocumentProxy> };
             renderTextLayer: (params: unknown) => { promise: Promise<void> };
           };
         }).pdfjsLib;
+
+        if (!pdfjs) {
+          // Poll for up to 3 seconds in case the script is still executing
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            pdfjs = (window as unknown as any).pdfjsLib;
+            if (pdfjs) break;
+          }
+        }
+        
         if (!pdfjs) {
           throw new Error('PDF.js not loaded. Check script injection.');
         }
