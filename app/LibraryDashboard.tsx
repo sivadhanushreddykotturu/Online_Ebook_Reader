@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import Script from 'next/script';
 import Link from 'next/link';
 import { uploadBook } from '@/lib/uploadBook';
+import { useOnlineStatus } from '@/lib/useOnlineStatus';
+import { getCachedBookmarks, setCachedBookmarks, CachedBookmark } from '@/lib/bookmarkCache';
 
 interface Book {
   _id: string;
@@ -24,7 +26,13 @@ interface MiniPDFDocument {
 }
 
 export default function LibraryDashboard() {
+  const { isOnline, wasOffline } = useOnlineStatus();
+  const [mounted, setMounted] = useState(false);
   const [books, setBooks] = useState<Book[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -45,6 +53,11 @@ export default function LibraryDashboard() {
   const [customAlert, setCustomAlert] = useState<{ message: string; title?: string } | null>(null);
   const [customConfirm, setCustomConfirm] = useState<{ message: string; onConfirm: () => void; title?: string } | null>(null);
 
+  // Dashboard Bookmarks Modal States
+  const [selectedBookForBookmarks, setSelectedBookForBookmarks] = useState<{ _id: string; title: string } | null>(null);
+  const [dashboardBookmarks, setDashboardBookmarks] = useState<CachedBookmark[]>([]);
+  const [isLoadingDashboardBookmarks, setIsLoadingDashboardBookmarks] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,10 +70,12 @@ export default function LibraryDashboard() {
         console.error('Failed to parse cached library:', err);
       }
     }
-    fetchBooks();
+    if (isOnline) {
+      fetchBooks();
+    }
 
     const handleSync = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         fetchBooks();
       }
     };
@@ -72,7 +87,7 @@ export default function LibraryDashboard() {
       document.removeEventListener('visibilitychange', handleSync);
       window.removeEventListener('focus', handleSync);
     };
-  }, []);
+  }, [isOnline]);
 
   // Click outside to close dropdowns
   useEffect(() => {
@@ -134,7 +149,7 @@ export default function LibraryDashboard() {
       if (!pdfjs) {
         throw new Error('PDF.js library not loaded yet.');
       }
-      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      pdfjs.GlobalWorkerOptions.workerSrc = '/lib/pdf.worker.min.js';
       
       const fileURL = URL.createObjectURL(file);
       const loadingTask = pdfjs.getDocument(fileURL);
@@ -211,6 +226,14 @@ export default function LibraryDashboard() {
       return;
     }
 
+    if (!isOnline) {
+      setCustomAlert({
+        title: 'Offline Mode',
+        message: 'Renaming books is disabled while offline. Please reconnect to rename books.',
+      });
+      return;
+    }
+
     try {
       const res = await fetch(`/api/books/${bookId}`, {
         method: 'PATCH',
@@ -229,6 +252,14 @@ export default function LibraryDashboard() {
   };
 
   const handleConfirmDelete = async (bookId: string, title: string) => {
+    if (!isOnline) {
+      setCustomAlert({
+        title: 'Offline Mode',
+        message: 'Deleting books is disabled while offline. Please reconnect to delete books.',
+      });
+      return;
+    }
+
     setCustomConfirm({
       title: 'Delete Book',
       message: `Are you sure you want to delete "${title}"? This will permanently delete the file from both storage and your library database.`,
@@ -259,6 +290,37 @@ export default function LibraryDashboard() {
     });
   };
 
+  const handleOpenBookmarksModal = async (bookId: string, bookTitle: string) => {
+    setSelectedBookForBookmarks({ _id: bookId, title: bookTitle });
+    setIsLoadingDashboardBookmarks(true);
+    setDashboardBookmarks([]);
+
+    try {
+      if (navigator.onLine) {
+        const res = await fetch(`/api/books/${bookId}/bookmarks`);
+        if (res.ok) {
+          const serverBookmarks: CachedBookmark[] = await res.json();
+          await setCachedBookmarks(bookId, serverBookmarks);
+          setDashboardBookmarks(serverBookmarks);
+          setIsLoadingDashboardBookmarks(false);
+          return;
+        }
+      }
+
+      // Offline or fetch failed: fallback to cache
+      const cached = await getCachedBookmarks(bookId);
+      const visible = cached.filter((b) => b.pendingSync !== 'delete');
+      setDashboardBookmarks(visible);
+    } catch (err) {
+      console.warn('Failed to load bookmarks for dashboard modal:', err);
+      const cached = await getCachedBookmarks(bookId);
+      const visible = cached.filter((b) => b.pendingSync !== 'delete');
+      setDashboardBookmarks(visible);
+    } finally {
+      setIsLoadingDashboardBookmarks(false);
+    }
+  };
+
   // Logic to allow closing modal if it hasn't uploaded yet OR if an error happened
   const hasUploadError = uploadStatus.startsWith('Error');
   const canCloseModal = !uploadProgress || hasUploadError;
@@ -266,28 +328,87 @@ export default function LibraryDashboard() {
   return (
     <>
       <Script
-        src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+        src="/lib/pdf.min.js"
         strategy="afterInteractive"
       />
 
       <div style={{ padding: '40px 24px', maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
+        {/* Offline Warning Banner */}
+        {mounted && !isOnline && (
+          <div style={{
+            background: 'rgba(217, 119, 6, 0.12)',
+            border: '1px solid rgba(217, 119, 6, 0.25)',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            color: '#fbbf24',
+            fontSize: '14px',
+            marginBottom: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>
+              Currently you&apos;re offline. Sync only happens when you get back online while you&apos;re in the app.
+            </span>
+          </div>
+        )}
+
+        {/* Reconnect Toast */}
+        {mounted && wasOffline && (
+          <div style={{
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            color: '#34d399',
+            fontSize: '14px',
+            marginBottom: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              Back online! Syncing reading progress and library...
+            </span>
+          </div>
+        )}
+
         {/* Top bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: 400, color: '#ffffff' }}>Library</h1>
           <button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => {
+              if (!isOnline) {
+                setCustomAlert({
+                  title: 'Offline Mode',
+                  message: 'Uploading books is disabled while offline. Please reconnect to upload new files.',
+                });
+                return;
+              }
+              setIsModalOpen(true);
+            }}
             style={{
-              border: '1px solid #2f2f2f',
+              border: isOnline ? '1px solid #2f2f2f' : '1px solid #2f2f2f50',
               background: 'transparent',
-              color: '#ffffff',
+              color: isOnline ? '#ffffff' : '#ffffff50',
               padding: '8px 16px',
               fontSize: '14px',
-              cursor: 'pointer',
+              cursor: isOnline ? 'pointer' : 'not-allowed',
               fontFamily: 'inherit',
               transition: 'background 0.15s ease',
             }}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#202020'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            onMouseEnter={(e) => {
+              if (isOnline) e.currentTarget.style.background = '#202020';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
           >
             + Add Book
           </button>
@@ -443,6 +564,27 @@ export default function LibraryDashboard() {
                                 onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                               >
                                 Rename
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenBookmarksModal(book._id, book.title);
+                                  setActiveDropdownBookId(null);
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: '#fbbf24',
+                                  fontSize: '13px',
+                                  padding: '8px 12px',
+                                  textAlign: 'left',
+                                  cursor: 'pointer',
+                                  width: '100%',
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#303030'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                              >
+                                Bookmarks
                               </button>
                               <button
                                 onClick={(e) => {
@@ -783,6 +925,142 @@ export default function LibraryDashboard() {
                 }}
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Bookmarks List Modal */}
+      {selectedBookForBookmarks && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            background: '#202020',
+            border: '1px solid #2f2f2f',
+            borderRadius: '8px',
+            padding: '24px',
+            width: '400px',
+            maxWidth: '90vw',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #ffffff10', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ color: '#fbbf24', fontSize: '12px', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Book Bookmarks</span>
+                <span style={{ color: '#ffffff', fontSize: '16px', fontWeight: 500, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }} title={selectedBookForBookmarks.title}>
+                  {selectedBookForBookmarks.title}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedBookForBookmarks(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#888888',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content List */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', paddingRight: '4px' }}>
+              {isLoadingDashboardBookmarks ? (
+                <div style={{ color: '#888', fontSize: '13px', textAlign: 'center', padding: '24px 0' }}>Loading bookmarks…</div>
+              ) : dashboardBookmarks.length === 0 ? (
+                <div style={{ color: '#666', fontSize: '13px', textAlign: 'center', padding: '24px 0', fontStyle: 'italic' }}>
+                  No bookmarks on this book yet.
+                </div>
+              ) : (
+                dashboardBookmarks.map((bookmark) => (
+                  <Link
+                    key={bookmark.pageNumber}
+                    href={`/reader/${selectedBookForBookmarks._id}?page=${bookmark.pageNumber}`}
+                    style={{
+                      background: '#191919',
+                      border: '1px solid #2f2f2f',
+                      borderRadius: '6px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      textDecoration: 'none',
+                      transition: 'border-color 0.15s ease, background 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = '#fbbf2440';
+                      e.currentTarget.style.background = '#222222';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = '#2f2f2f';
+                      e.currentTarget.style.background = '#191919';
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: '#fbbf24', fontWeight: 600, fontSize: '13px' }}>
+                        Page {bookmark.pageNumber}
+                      </span>
+                      <span style={{ color: '#666', fontSize: '11px' }}>
+                        Click to jump →
+                      </span>
+                    </div>
+                    {bookmark.note ? (
+                      <div style={{
+                        color: '#bbb',
+                        fontSize: '12px',
+                        lineHeight: '1.4',
+                        background: '#151515',
+                        padding: '8px',
+                        borderRadius: '4px',
+                        whiteSpace: 'pre-wrap',
+                      }}>
+                        {bookmark.note}
+                      </div>
+                    ) : (
+                      <div style={{ color: '#555', fontSize: '11px', fontStyle: 'italic' }}>
+                        No note added
+                      </div>
+                    )}
+                  </Link>
+                ))
+              )}
+            </div>
+
+            {/* Footer Close Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #ffffff10', paddingTop: '12px' }}>
+              <button
+                onClick={() => setSelectedBookForBookmarks(null)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #2f2f2f',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  padding: '8px 16px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#202020'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                Close
               </button>
             </div>
           </div>

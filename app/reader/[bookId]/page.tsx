@@ -42,8 +42,9 @@ export default async function ReaderPage({ params }: { params: { bookId: string 
 
   return (
     <>
+      <link rel="stylesheet" href="/lib/pdf_viewer.css" />
       <Script
-        src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+        src="/lib/pdf.min.js"
         strategy="beforeInteractive"
       />
       <ReaderComponent initialBook={initialBook} />

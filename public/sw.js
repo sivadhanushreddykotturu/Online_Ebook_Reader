@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf-reader-cache-v1';
+const CACHE_NAME = 'pdf-reader-cache-v2';
 
 // Initial core assets to cache
 const PRECACHE_ASSETS = [
@@ -6,7 +6,10 @@ const PRECACHE_ASSETS = [
   '/manifest.json',
   '/icons/icon-180x180.png',
   '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  '/icons/icon-512x512.png',
+  '/lib/pdf.min.js',
+  '/lib/pdf.worker.min.js',
+  '/lib/pdf_viewer.css'
 ];
 
 self.addEventListener('install', (event) => {
@@ -65,7 +68,8 @@ self.addEventListener('fetch', (event) => {
         if (
           networkResponse.status === 200 &&
           (event.request.url.includes('/_next/static/') ||
-            event.request.url.includes('/icons/'))
+            event.request.url.includes('/icons/') ||
+            event.request.url.includes('/lib/'))
         ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
@@ -73,6 +77,12 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return networkResponse;
+      }).catch((err) => {
+        // If offline and a navigation request fails, serve index page from cache
+        if (event.request.mode === 'navigate') {
+          return caches.match('/') || Promise.reject(err);
+        }
+        throw err;
       });
     })
   );
