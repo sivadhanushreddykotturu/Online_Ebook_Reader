@@ -85,17 +85,13 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const touchStartMidYViewportRef = useRef<number>(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoom, setZoom] = useState<number>(1.0);
   const [viewMode, setViewMode] = useState<'single' | 'split' | 'scroll'>('single');
   const [splitSide, setSplitSide] = useState<'left' | 'right'>('left');
   const [pageAspectRatio, setPageAspectRatio] = useState<number>(1.4);
   const nextPageRef = useRef<PDFPageProxy | null>(null);
-  const touchStartDistRef = useRef<number | null>(null);
-  const touchStartZoomRef = useRef<number>(1.0);
   const lastTapTimeRef = useRef<number>(0);
-  const gestureZoomRef = useRef<number | null>(null);
   const zoomTargetRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [windowWidth, setWindowWidth] = useState(800);
@@ -169,6 +165,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
         }),
       }).catch((err) => console.warn('Failed to sync progress on reconnect:', err));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnline, book]);
 
   const handleToggleBookmarkClick = () => {
@@ -714,7 +711,7 @@ export default function ReaderComponent({ initialBook }: { initialBook: Book }) 
     }
   };
 
-  const handleTouchMove = (e: React.TouchEvent) => {
+  const handleTouchMove = () => {
     // Native pinch-zoom handles zooming now, so we don't prevent default.
   };
 
